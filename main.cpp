@@ -1,6 +1,5 @@
 #include <iostream>
 #include <fstream>
-#include <vector>
 #include <bits/stdc++.h>
 #include <chrono>
 #include <unistd.h>
@@ -76,7 +75,6 @@ private:
     size_t n;
     size_t w;
     size_t h;
-    vector<MBNode*> vecMB; // remember to delete
 
 public:
 
@@ -92,20 +90,7 @@ public:
 
     ~Solution()
     {
-        for (auto mb : vecMB)
-        {
-            delete mb;
-        }
         delete[] dist_map;
-    }
-
-    static bool compareMBNodeX(MBNode* n1, MBNode* n2)
-    {
-        return (n1->x < n2->x);
-    }
-    static bool compareMBNodeY(MBNode* n1, MBNode* n2)
-    {
-        return (n1->y < n2->y);
     }
 
     int getNeighborMBId(size_t mb, DIRECTION drt)
@@ -115,31 +100,23 @@ public:
         {
         case DRT_TOPLEFT:
             return (mb - W_IN_MB - 1);
-            break;
         case DRT_TOP:
             return (mb - W_IN_MB);
-            break;
         case DRT_TOPRIGHT:
             return (mb - W_IN_MB + 1);
-            break;
         case DRT_RIGHT:
             return (mb + 1);
-            break;
         case DRT_BOTTOMRIGHT:
             return (mb + W_IN_MB + 1);
-            break;
         case DRT_BOTTOM:
             return (mb + W_IN_MB);
-            break;
         case DRT_BOTTOMLEFT:
             return (mb + W_IN_MB - 1);
-            break;
         case DRT_LEFT:
             return (mb - 1);
-            break;
         default:
+            printf("ERROR: invalid drt %d\n", drt);
             return mb;
-            break;
         }
         // TODO out of range top btn left right
     }
@@ -179,6 +156,58 @@ public:
         // TODO out of range top btn left right
     }
 
+    auto isBounded(size_t mb)
+    {
+        auto const W_IN_MB = w / MB_SIZE;
+        auto const H_IN_MB = h / MB_SIZE;
+        int top = mb;
+        int btm = mb;
+        int lef = mb;
+        int rig = mb;
+        bool topBounded = false;
+        bool btmBounded = false;
+        bool lefBounded = false;
+        bool rigBounded = false;
+
+        while(top >= 0)
+        {
+            if (dist_map[top].isBorder)
+            {
+                topBounded = true;
+                break;
+            }
+            top -= W_IN_MB;
+        }
+        while(btm <= (W_IN_MB * H_IN_MB))
+        {
+            if (dist_map[btm].isBorder)
+            {
+                btmBounded = true;
+                break;
+            }
+            btm += W_IN_MB;
+        }
+        while(lef >= (mb - ((mb/W_IN_MB) * W_IN_MB)))
+        {
+            if (dist_map[lef].isBorder)
+            {
+                lefBounded = true;
+                break;
+            }
+            lef -= 1;
+        }
+        while(rig <= ((mb / W_IN_MB) + 1) * W_IN_MB)
+        {
+            if (dist_map[rig].isBorder)
+            {
+                rigBounded = true;
+                break;
+            }
+            rig += 1;
+        }
+        return (topBounded && btmBounded && lefBounded && rigBounded);
+    };
+    
     void solve()
     {
         auto const W_IN_MB = w / MB_SIZE;
@@ -208,7 +237,6 @@ public:
 
             // step 1: mark non-black macroblocks
             memset((void*)dist_map, 0, sizeof(MBNode) * W_IN_MB * H_IN_MB);
-            vecMB.clear();
             for (mb = 0; mb < mb_num; ++mb)
             {
                 empty = true;
@@ -225,14 +253,11 @@ public:
                 {
                     x = (mb % (w/MB_SIZE)) * MB_SIZE;
                     y = (mb / (w/MB_SIZE)) * MB_SIZE;
-                    vecMB.push_back(new MBNode(mb, w));
 
                     dist_map[mb].isMarked = true;
                     dist_map[mb].mb = mb;
                 }
             }
-            sort(vecMB.begin(), vecMB.end(), compareMBNodeY);
-            // printf("cnt: %d\n", vecMB.size());
 
             // step 1.1: mark raise and fall
             if (1)
@@ -252,6 +277,7 @@ public:
                             else
                             {
                                 dist_map[row*W_IN_MB+ col - 1].isFellen = true;
+                                // dist_map[row*W_IN_MB+ col - 1].isBorder = true;
                                 raised = false;
                             }
                             continue;
@@ -260,6 +286,7 @@ public:
                         if (dist_map[row*W_IN_MB+ col].isMarked)
                         {
                             dist_map[row*W_IN_MB+ col].isRaised = true;
+                            // dist_map[row*W_IN_MB+ col].isBorder = true;
                             raised = true;
                         }
                     }
@@ -267,6 +294,7 @@ public:
             }
 
             // step 2: identify the boundary, save and blackout 
+
             auto shape_cnt = 0;
             for (auto row = 0; row < H_IN_MB; ++row)
             {
@@ -275,13 +303,14 @@ public:
                 {
                     if (border_raised)
                     {
-                        if (dist_map[row*W_IN_MB+ col].isBorder)
-                        {
-                            continue;
-                        }
+                        // if (dist_map[row*W_IN_MB+ col].isFellen)
                         if (!dist_map[row*W_IN_MB+ col].isMarked)
                         {
                             border_raised = false;
+                        }
+                        if (dist_map[row*W_IN_MB+ col].isBorder)
+                        {
+                            continue;
                         }
                         continue;
                     }
@@ -294,18 +323,23 @@ public:
 
                     if (dist_map[row*W_IN_MB+ col].isMarked)
                     {
+                        if (isBounded(row*W_IN_MB+ col))
+                        {
+                            continue;
+                        }
                         //do things here
                         // identify
                         auto start_mb = &dist_map[row*W_IN_MB+ col];
                         auto curr_mb = start_mb;
                         auto prev_mb = start_mb;
-                        printf("mb#%d %d-%d\n", start_mb->mb, start_mb->mb%w,  start_mb->mb/w);
+                        // printf("mb#%d %d-%d\n", start_mb->mb, start_mb->mb%w,  start_mb->mb/w);
 
                         auto prev_drt = DRT_TOP;
                         size_t top ,btm , left, right;
                         top = btm = curr_mb->mb/w;      // row
                         left = right = curr_mb->mb%w;   // col
-                        for (i = DRT_TOP; i <= DRT_BOTTOM; ++i)
+                        // pre process
+                        for (i = DRT_RIGHT; i <= DRT_LEFT; ++i)
                         {
                             auto nextMBId = getNeighborMBId(start_mb->mb, (DIRECTION)i);
                             if (nextMBId < 0) {
@@ -314,15 +348,19 @@ public:
                                 // if (!dist_map[getNeighborMBId(start_mb->mb, DRT_RIGHT)
                                 // nextMBId = start_mb->mb + 1; // TODO move into getNeighbor
                             }
-                            printf("nextMBId %d %d-%d\n", nextMBId, nextMBId % w, nextMBId / w);
+                            // printf("nextMBId %d %d-%d\n", nextMBId, nextMBId % w, nextMBId / w);
                             if (dist_map[nextMBId].isMarked)
                             {
-                                printf("0 %s mb#%d is %d\n", DirectionType[i], nextMBId, dist_map[nextMBId].isMarked);
+                                // printf("0 %s mb#%d is %d\n", DirectionType[i], nextMBId, dist_map[nextMBId].isMarked);
+
+                                // buffer[img*w*h + curr_mb->mb] = 255; // for test
+
                                 prev_drt = (DIRECTION)i;
                                 curr_mb = &dist_map[nextMBId];
                                 break;
                             }
                         }
+                        // process
                         while(curr_mb->mb != start_mb->mb)
                         {
                             // save
@@ -360,9 +398,9 @@ public:
                                 if (dist_map[nextMBId].isMarked && (dist_map[nextMBId].mb != prev_mb->mb || dist_map[nextMBId].isBorder)) //TODO impl equal MB
                                 // TODO turn around in single line
                                 {
-                                    printf("1 %s %s>%s mb#%d %d-%d is %d\n", DirectionType[prev_drt], DirectionType[drt],  DirectionType[drt_it], nextMBId, curr_mb->mb%w,  curr_mb->mb/w, dist_map[nextMBId].isMarked);
+                                    // printf("1 %s %s>%s mb#%d %d-%d is %d\n", DirectionType[prev_drt], DirectionType[drt],  DirectionType[drt_it], nextMBId, curr_mb->mb%w,  curr_mb->mb/w, dist_map[nextMBId].isMarked);
                                     
-                                    buffer[img*w*h + curr_mb->mb] = 255; // for test
+                                    // buffer[img*w*h + curr_mb->mb] = 255; // for test
 
                                     curr_mb->isBorder = true;
                                     
@@ -374,8 +412,19 @@ public:
                                 ++drt_it;
                                 if (drt_it == DRT_MAX) drt_it = 0;
                             }
-                            while (drt_it != drt); // prioritize edge
+                            while (drt_it != drt);
                         }
+                        // post process
+                        {
+                            // buffer[img*w*h + curr_mb->mb] = 255; // for test
+                            curr_mb->isBorder = true;
+                        }
+                        // fill with white
+                        while(curr_mb->mb != start_mb->mb)
+                        {
+
+                        }
+
                         // draw rectangle
                         printf("img#%d no.%d top left w h = %d %d %d %d\n", img,  ++shape_cnt, top, left, right - left, btm - top);
                         for (i = left; i < right; ++i)
@@ -388,6 +437,7 @@ public:
                             buffer[img*w*h + top*W_IN_MB + left  + i*W_IN_MB] = 255;
                             buffer[img*w*h + top*W_IN_MB + right + i*W_IN_MB] = 255;
                         }
+
                     }
                 }
 
@@ -396,7 +446,7 @@ public:
             outfile.write(buffer, n*h*w);
             outfile.close();
 
-            break;
+            // break;
         }
     }
 
