@@ -1,6 +1,10 @@
 #!/bin/bash
 
-mkdir output
+if [[ -d output ]]; then
+  rm output/*
+else
+  mkdir output
+fi
 cd output
 split -d -b 480000 ../output.bin img
 for entry in *

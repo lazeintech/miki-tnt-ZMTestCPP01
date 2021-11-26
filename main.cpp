@@ -10,7 +10,259 @@ using namespace std;
 
 class Solution
 {
-#define MB_SIZE 1
+// #define VISUALIZE_RESULT
+// #define ENABLE_DEBUG
+
+// macroblock size
+#define MB_1X1          (1)
+#define MB_2X2          (2)
+#define MB_4X4          (4)
+#define MB_8X8          (8)
+#define MB_SIZE         MB_1X1
+
+// macroblock status
+#define MB_IS_BLACK     (0)
+#define MB_IS_MARKED    (1 << 0)
+#define MB_IS_BORDER    (1 << 1)
+
+    char   *buffer, *mb_map;
+    size_t n, w, h;
+
+public:
+    Solution(char* buffer, size_t n, size_t w, size_t h)
+    {
+        this->buffer = buffer;
+        this->n = n;
+        this->w = w;
+        this->h = h;
+
+        // allocate memory for macroblock map
+        mb_map = new char[(w * h) / (MB_SIZE * MB_SIZE)];
+    }
+
+    ~Solution()
+    {
+        delete[] mb_map;
+    }
+
+    void solve()
+    {
+        // width height in macroblock size
+        auto const W_IN_MB = w / MB_SIZE;
+        auto const H_IN_MB = h / MB_SIZE;
+
+        // variables
+#if   (MB_SIZE == MB_1X1)
+        uint8_t *mb_line;
+#elif (MB_SIZE == MB_2X2)
+        uint16_t *mb_line;
+#elif (MB_SIZE == MB_4X4)
+        uint32_t *mb_line;
+#elif (MB_SIZE == MB_8X8)
+        uint64_t *mb_line;
+#endif
+        size_t i, mbid, line, row, col;
+        size_t offset_addr, offset_id, object_cnt, mb_line_offset;
+        size_t first_mbid, curr_mbid, prev_mbid;
+        int    next_mbid;
+        size_t top, btm, left, right, new_row, new_col;
+        size_t drt, drt_it;
+        DIRECTION prev_drt = DRT_TOP;
+
+        std::ofstream result_file("result.txt");
+        char object_info[50];
+
+        auto mb_num      = (w * h) / (MB_SIZE * MB_SIZE);
+        auto img_bytes   = w * h;
+        auto is_empty    = true;
+        auto is_inbound  = false;
+
+        for (auto img = 0; img < n; ++img)
+        {
+            // process each image
+            printf("==== processing img #%d ====\n", img);
+            offset_addr = (size_t)buffer + (img * img_bytes);
+            offset_id   = img * img_bytes;
+            object_cnt  = 0;
+
+            // step 1: mark non-black macroblocks
+            memset((void*)mb_map, MB_IS_BLACK, sizeof(mb_map[0]) * mb_num);
+            for (mbid = 0; mbid < mb_num; ++mbid)
+            {
+                is_empty = true;
+                mb_line_offset = (mbid / W_IN_MB) * MB_SIZE * w + (mbid % W_IN_MB) * MB_SIZE;
+                for (line = 0; line < MB_SIZE; ++line)
+                {
+                    mb_line = (decltype(mb_line))(offset_addr + mb_line_offset + line*w);
+                    if (*mb_line)
+                    {
+                        is_empty = false;
+                        break;
+                    }
+                }
+                if (!is_empty)
+                {
+                    mb_map[mbid] |= MB_IS_MARKED;
+                }
+            }
+
+            // step 2: identify the object boundary
+            for (row = 0; row < H_IN_MB; ++row)
+            {
+                is_inbound = false;
+                for (col = 0; col < W_IN_MB; ++col)
+                {
+                    mbid = row * W_IN_MB + col;
+                    /* seeking object */
+                    if (is_inbound)
+                    {
+                        // non-marked -> outbound
+                        if (!(mb_map[mbid] & MB_IS_MARKED))
+                            is_inbound = false;
+
+                        continue;
+                    }
+                    
+                    if (mb_map[mbid] & MB_IS_BORDER)
+                    {
+                        // found border of already detected object -> inbound
+                        is_inbound = true;
+                        continue;
+                    }
+
+                    // skip the black macroblock
+                    if (!(mb_map[mbid] & MB_IS_MARKED))
+                        continue;
+                    // skip object's inbound macroblock
+                    if (isBounded(mbid))
+                        continue;
+
+                    /* found object -> processing border */
+                    prev_drt = DRT_TOP;
+                    first_mbid = curr_mbid = prev_mbid = next_mbid = mbid;
+                    top  = btm   = first_mbid / W_IN_MB;   // row
+                    left = right = first_mbid % W_IN_MB;   // col
+#ifdef ENABLE_DEBUG
+                    printf("first_mbid mbid#%d %d-%d\n", first_mbid, left, top);
+#endif
+
+                    // process first macroblock of object's border
+                    for (i = DRT_RIGHT; i <= DRT_LEFT; ++i)
+                    {
+                        next_mbid = getNeighborMBId(first_mbid, (DIRECTION)i);
+                        if (next_mbid < 0) {
+                            continue;
+                        }
+#ifdef ENABLE_DEBUG
+                        printf("next_mbid %d %d-%d\n", next_mbid, next_mbid % W_IN_MB, next_mbid / W_IN_MB);
+#endif
+                        if (mb_map[next_mbid] & MB_IS_MARKED)
+                        {
+#ifdef ENABLE_DEBUG
+                            printf("0 %s mbid#%d is %d\n", DirectionType[i], next_mbid, mb_map[next_mbid]);
+                            // buffer[offset_id + curr_mbid] = 255; // visualize boundary
+#endif
+                            prev_drt  = (DIRECTION)i;
+                            curr_mbid = next_mbid;
+                            break;
+                        }
+                    }
+                    // process next macroblocks of object's border
+                    while(curr_mbid != first_mbid)
+                    {
+                        // save edges
+                        new_row = curr_mbid / W_IN_MB;
+                        new_col = curr_mbid % W_IN_MB;
+                        if (top > new_row)   top   = new_row;
+                        if (btm < new_row)   btm   = new_row;
+                        if (left > new_col)  left  = new_col;
+                        if (right < new_col) right = new_col;
+
+                        // adaptive direction border search
+                        drt = getRevertDrt(prev_drt) + 1;
+                        if (drt == DRT_MAX) drt = 0;
+                        drt_it = drt;
+                        do {
+                            next_mbid = getNeighborMBId(curr_mbid, (DIRECTION)drt_it);
+                            if (next_mbid < 0) {
+                                ++drt_it;
+                                if (drt_it == DRT_MAX) drt_it = 0;
+                                continue;
+                            }
+                            if ((mb_map[next_mbid] & MB_IS_MARKED) && (next_mbid != prev_mbid || (mb_map[next_mbid] & MB_IS_BORDER)))
+                            {
+#ifdef ENABLE_DEBUG
+                                printf("1 %s %s>%s mbid#%d %d-%d is %d\n", 
+                                        DirectionType[prev_drt], DirectionType[drt],  DirectionType[drt_it],
+                                        next_mbid, new_col, new_row, mb_map[next_mbid]);
+                                // buffer[offset_id + curr_mbid] = 255; // visualize boundary
+#endif
+                                mb_map[curr_mbid] |= MB_IS_BORDER;
+                                
+                                prev_drt  = (DIRECTION)drt_it;
+                                prev_mbid = curr_mbid;
+                                curr_mbid = next_mbid;
+                                break;
+                            }
+                            ++drt_it;
+                            if (drt_it == DRT_MAX) drt_it = 0;
+                        }
+                        while (drt_it != drt);
+                    }
+                    // process last macroblock of object's border
+                    mb_map[curr_mbid] |= MB_IS_BORDER;
+#ifdef ENABLE_DEBUG
+                    // buffer[offset_id + curr_mbid] = 255; // visualize boundary
+#endif
+
+                    // calculate coordinate
+                    top         *= MB_SIZE;
+                    btm         *= MB_SIZE;
+                    left        *= MB_SIZE;
+                    right       *= MB_SIZE;
+                    auto width  = (right - left);
+                    auto height = (btm - top);
+
+                    printf("img#%d object#%d top left width height = %u %u %u %u\n",
+                            img, ++object_cnt, top, left, width, height);
+
+                    // output result to file
+                    sprintf(object_info, "(%d, %d, %d, %d) ", top, left, width, height);
+                    result_file << object_info;
+
+#ifdef VISUALIZE_RESULT
+                    // draw rectangle
+                    for (i = left; i < right; ++i)
+                    {
+                        buffer[offset_id + top * w + i] = 255;
+                        buffer[offset_id + btm * w + i] = 255;
+                    }
+                    for (i = 0; i < height; ++i)
+                    {
+                        buffer[offset_id + top * w + left  + i * w] = 255;
+                        buffer[offset_id + top * w + right + i * w] = 255;
+                    }
+#endif
+                }
+            }
+            result_file << "\n";
+
+#ifdef ENABLE_DEBUG
+            printf("bcnt: %d\n", bcnt);
+            bcnt = 0;
+#endif
+        }
+        
+#ifdef VISUALIZE_RESULT
+        // write output pictures with drawn rectangle to file
+        std::ofstream outfile("output.bin");
+        outfile.write(buffer, n*h*w);
+        outfile.close();
+#endif
+        result_file.close();
+
+        
+    }
 
 private:
     enum DIRECTION
@@ -37,91 +289,35 @@ private:
         (char*)"DRT_LEFT        "
     };
 
-    class MBNode
+    int getNeighborMBId(size_t id, DIRECTION drt)
     {
-    public:
-        MBNode() {}
-        
-        MBNode(size_t mb, size_t w)
-        {
-            this->mb = mb;
-            this->w  = w;
-            this->x = (mb % (w/MB_SIZE)) * MB_SIZE;
-            this->y = (mb / (w/MB_SIZE)) * MB_SIZE;
-        }
-
-        auto getX()
-        {
-            return (mb % (w/MB_SIZE)) * MB_SIZE;
-        }
-        auto getY()
-        {
-            return (mb / (w/MB_SIZE)) * MB_SIZE;
-        }
-
-        // todo isEqual xx yy
-        size_t mb;
-        bool isMarked;
-        bool isBorder;
-        bool isRaised;
-        bool isFellen;
-        size_t x;
-        size_t y;
-        size_t w;
-    };
-
-    char* buffer;
-    MBNode* dist_map;
-    size_t n;
-    size_t w;
-    size_t h;
-
-public:
-
-    Solution(char* buffer, size_t n, size_t w, size_t h)
-    {
-        this->buffer = buffer;
-        this->n = n;
-        this->w = w;
-        this->h = h;
-
-        dist_map = new MBNode[(w * h) / (MB_SIZE * MB_SIZE)];
-    }
-
-    ~Solution()
-    {
-        delete[] dist_map;
-    }
-
-    int getNeighborMBId(size_t mb, DIRECTION drt)
-    {
+        // TODO: validate wrapped border
         auto const W_IN_MB = w / MB_SIZE;
         switch (drt)
         {
         case DRT_TOPLEFT:
-            return (mb - W_IN_MB - 1);
+            return (id - W_IN_MB - 1);
         case DRT_TOP:
-            return (mb - W_IN_MB);
+            return (id - W_IN_MB);
         case DRT_TOPRIGHT:
-            return (mb - W_IN_MB + 1);
+            return (id - W_IN_MB + 1);
         case DRT_RIGHT:
-            return (mb + 1);
+            return (id + 1);
         case DRT_BOTTOMRIGHT:
-            return (mb + W_IN_MB + 1);
+            return (id + W_IN_MB + 1);
         case DRT_BOTTOM:
-            return (mb + W_IN_MB);
+            return (id + W_IN_MB);
         case DRT_BOTTOMLEFT:
-            return (mb + W_IN_MB - 1);
+            return (id + W_IN_MB - 1);
         case DRT_LEFT:
-            return (mb - 1);
+            return (id - 1);
         default:
             printf("ERROR: invalid drt %d\n", drt);
-            return mb;
+            return id;
         }
-        // TODO out of range top btn left right
     }
 
-    auto getRevertDrt(DIRECTION drt)
+    DIRECTION getRevertDrt(DIRECTION drt)
     {
         switch (drt)
         {
@@ -153,17 +349,20 @@ public:
             return DRT_MAX;
             break;
         }
-        // TODO out of range top btn left right
     }
 
-    auto isBounded(size_t mb)
+
+#ifdef ENABLE_DEBUG
+    int bcnt = 0;
+#endif
+    bool isBounded(size_t id)
     {
         auto const W_IN_MB = w / MB_SIZE;
         auto const H_IN_MB = h / MB_SIZE;
-        int top = mb;
-        int btm = mb;
-        int lef = mb;
-        int rig = mb;
+        int top = id;
+        int btm = id;
+        int lef = id;
+        int rig = id;
         bool topBounded = false;
         bool btmBounded = false;
         bool lefBounded = false;
@@ -171,285 +370,65 @@ public:
 
         while(top >= 0)
         {
-            if (dist_map[top].isBorder)
+#ifdef ENABLE_DEBUG
+            ++bcnt;
+#endif
+            if (mb_map[top] & MB_IS_BORDER)
             {
                 topBounded = true;
                 break;
             }
             top -= W_IN_MB;
         }
-        while(btm <= (W_IN_MB * H_IN_MB))
+        if (!topBounded) return false;
+
+        auto first_col = id - ((id / W_IN_MB) * W_IN_MB);
+        while(lef >= first_col)
         {
-            if (dist_map[btm].isBorder)
-            {
-                btmBounded = true;
-                break;
-            }
-            btm += W_IN_MB;
-        }
-        while(lef >= (mb - ((mb/W_IN_MB) * W_IN_MB)))
-        {
-            if (dist_map[lef].isBorder)
+#ifdef ENABLE_DEBUG
+            ++bcnt;
+#endif
+            if (mb_map[lef] & MB_IS_BORDER)
             {
                 lefBounded = true;
                 break;
             }
             lef -= 1;
         }
-        while(rig <= ((mb / W_IN_MB) + 1) * W_IN_MB)
+        if (!lefBounded) return false;
+
+        auto max_mbid = W_IN_MB * H_IN_MB;
+        while(btm <= max_mbid)
         {
-            if (dist_map[rig].isBorder)
+#ifdef ENABLE_DEBUG
+            ++bcnt;
+#endif
+            if (mb_map[btm] & MB_IS_BORDER)
+            {
+                btmBounded = true;
+                break;
+            }
+            btm += W_IN_MB;
+        }
+        if (!btmBounded) return false;
+        
+        auto last_col = ((id / W_IN_MB) + 1) * W_IN_MB; 
+        while(rig <= last_col)
+        {
+#ifdef ENABLE_DEBUG
+            ++bcnt;
+#endif
+            if (mb_map[rig] & MB_IS_BORDER)
             {
                 rigBounded = true;
                 break;
             }
             rig += 1;
         }
-        return (topBounded && btmBounded && lefBounded && rigBounded);
+        if (!rigBounded) return false;
+
+        return true;;
     };
-    
-    void solve()
-    {
-        auto const W_IN_MB = w / MB_SIZE;
-        auto const H_IN_MB = h / MB_SIZE;
-
-#if(MB_SIZE == 1)
-        uint8_t *mb_line;
-#elif(MB_SIZE == 2)
-        uint16_t *mb_line;
-#elif(MB_SIZE == 4)
-        uint32_t *mb_line;
-#elif(MB_SIZE == 8)
-        uint64_t *mb_line;
-#else
-#error Invalid MB_SIZE (must be 1, 2, 4 or 8)
-#endif
-        size_t i, mb, line, x, y;
-        auto mb_num = (w * h) / (MB_SIZE * MB_SIZE);
-        auto img_bytes = w * h;
-        auto empty = true;
-
-        for (auto img = 0; img < n; ++img)
-        {
-            /** process each image **/
-            printf("==== processing img #%d ====\n", img);
-            auto offset_addr = (size_t)buffer + (img * img_bytes);
-
-            // step 1: mark non-black macroblocks
-            memset((void*)dist_map, 0, sizeof(MBNode) * W_IN_MB * H_IN_MB);
-            for (mb = 0; mb < mb_num; ++mb)
-            {
-                empty = true;
-                for (line = 0; line < MB_SIZE; ++line)
-                {
-                    mb_line = (decltype(mb_line))(offset_addr + ( (mb/W_IN_MB)*MB_SIZE*w + (mb%W_IN_MB)*MB_SIZE ) + line*w);
-                    if (*mb_line)
-                    {
-                        empty = false;
-                        break;
-                    }
-                }
-                if (!empty)
-                {
-                    x = (mb % (w/MB_SIZE)) * MB_SIZE;
-                    y = (mb / (w/MB_SIZE)) * MB_SIZE;
-
-                    dist_map[mb].isMarked = true;
-                    dist_map[mb].mb = mb;
-                }
-            }
-
-            // step 1.1: mark raise and fall
-            if (1)
-            {
-                // identify raise and fall
-                for (auto row = 0; row < H_IN_MB; ++row)
-                {
-                    auto raised = false;
-                    for (auto col = 0; col < W_IN_MB; ++col)
-                    {
-                        if (raised)
-                        {
-                            if (dist_map[row*W_IN_MB+ col].isMarked)
-                            {
-                                raised = true;
-                            }
-                            else
-                            {
-                                dist_map[row*W_IN_MB+ col - 1].isFellen = true;
-                                // dist_map[row*W_IN_MB+ col - 1].isBorder = true;
-                                raised = false;
-                            }
-                            continue;
-                        }
-
-                        if (dist_map[row*W_IN_MB+ col].isMarked)
-                        {
-                            dist_map[row*W_IN_MB+ col].isRaised = true;
-                            // dist_map[row*W_IN_MB+ col].isBorder = true;
-                            raised = true;
-                        }
-                    }
-                }
-            }
-
-            // step 2: identify the boundary, save and blackout 
-
-            auto shape_cnt = 0;
-            for (auto row = 0; row < H_IN_MB; ++row)
-            {
-                auto border_raised = false;
-                for (auto col = 0; col < W_IN_MB; ++col)
-                {
-                    if (border_raised)
-                    {
-                        // if (dist_map[row*W_IN_MB+ col].isFellen)
-                        if (!dist_map[row*W_IN_MB+ col].isMarked)
-                        {
-                            border_raised = false;
-                        }
-                        if (dist_map[row*W_IN_MB+ col].isBorder)
-                        {
-                            continue;
-                        }
-                        continue;
-                    }
-
-                    if (dist_map[row*W_IN_MB+ col].isBorder)
-                    {
-                        border_raised = true;
-                        continue;
-                    }
-
-                    if (dist_map[row*W_IN_MB+ col].isMarked)
-                    {
-                        if (isBounded(row*W_IN_MB+ col))
-                        {
-                            continue;
-                        }
-                        //do things here
-                        // identify
-                        auto start_mb = &dist_map[row*W_IN_MB+ col];
-                        auto curr_mb = start_mb;
-                        auto prev_mb = start_mb;
-                        // printf("mb#%d %d-%d\n", start_mb->mb, start_mb->mb%w,  start_mb->mb/w);
-
-                        auto prev_drt = DRT_TOP;
-                        size_t top ,btm , left, right;
-                        top = btm = curr_mb->mb/w;      // row
-                        left = right = curr_mb->mb%w;   // col
-                        // pre process
-                        for (i = DRT_RIGHT; i <= DRT_LEFT; ++i)
-                        {
-                            auto nextMBId = getNeighborMBId(start_mb->mb, (DIRECTION)i);
-                            if (nextMBId < 0) {
-                                continue;
-                                // top line TODO: handle left and right line?
-                                // if (!dist_map[getNeighborMBId(start_mb->mb, DRT_RIGHT)
-                                // nextMBId = start_mb->mb + 1; // TODO move into getNeighbor
-                            }
-                            // printf("nextMBId %d %d-%d\n", nextMBId, nextMBId % w, nextMBId / w);
-                            if (dist_map[nextMBId].isMarked)
-                            {
-                                // printf("0 %s mb#%d is %d\n", DirectionType[i], nextMBId, dist_map[nextMBId].isMarked);
-
-                                // buffer[img*w*h + curr_mb->mb] = 255; // for test
-
-                                prev_drt = (DIRECTION)i;
-                                curr_mb = &dist_map[nextMBId];
-                                break;
-                            }
-                        }
-                        // process
-                        while(curr_mb->mb != start_mb->mb)
-                        {
-                            // save
-                            if (top > curr_mb->mb/w)
-                            {
-                                top = curr_mb->mb/w;
-                            }
-                            if (btm < curr_mb->mb/w)
-                            {
-                                btm = curr_mb->mb/w;
-                            }
-                            if (left > curr_mb->mb%w)
-                            {
-                                left = curr_mb->mb%w;
-                            }
-                            if (right < curr_mb->mb%w)
-                            {
-                                right = curr_mb->mb%w;
-                            }
-
-                            int drt = getRevertDrt(prev_drt) + 1;
-                            if (drt == DRT_MAX) drt = 0;
-                            auto drt_it = drt;
-                            do {
-                                auto nextMBId = getNeighborMBId(curr_mb->mb, (DIRECTION)drt_it);
-                                if (nextMBId < 0) {
-                                    ++drt_it;
-                                    if (drt_it == DRT_MAX) drt_it = 0;
-                                    continue;
-                                    // top line TODO: handle left and right line?
-                                    // if (!dist_map[getNeighborMBId(start_mb->mb, DRT_RIGHT)
-                                    // nextMBId = start_mb->mb + 1; // TODO move into getNeighbor
-                                }
-                                // if (dist_map[nextMBId].isMarked && dist_map[nextMBId].mb != prev_mb->mb) //TODO impl equal MB
-                                if (dist_map[nextMBId].isMarked && (dist_map[nextMBId].mb != prev_mb->mb || dist_map[nextMBId].isBorder)) //TODO impl equal MB
-                                // TODO turn around in single line
-                                {
-                                    // printf("1 %s %s>%s mb#%d %d-%d is %d\n", DirectionType[prev_drt], DirectionType[drt],  DirectionType[drt_it], nextMBId, curr_mb->mb%w,  curr_mb->mb/w, dist_map[nextMBId].isMarked);
-                                    
-                                    // buffer[img*w*h + curr_mb->mb] = 255; // for test
-
-                                    curr_mb->isBorder = true;
-                                    
-                                    prev_drt = (DIRECTION)drt_it;
-                                    prev_mb = curr_mb;
-                                    curr_mb = &dist_map[nextMBId];
-                                    break;
-                                }
-                                ++drt_it;
-                                if (drt_it == DRT_MAX) drt_it = 0;
-                            }
-                            while (drt_it != drt);
-                        }
-                        // post process
-                        {
-                            // buffer[img*w*h + curr_mb->mb] = 255; // for test
-                            curr_mb->isBorder = true;
-                        }
-                        // fill with white
-                        while(curr_mb->mb != start_mb->mb)
-                        {
-
-                        }
-
-                        // draw rectangle
-                        printf("img#%d no.%d top left w h = %d %d %d %d\n", img,  ++shape_cnt, top, left, right - left, btm - top);
-                        for (i = left; i < right; ++i)
-                        {
-                            buffer[img*w*h + top*W_IN_MB + i] = 255;
-                            buffer[img*w*h + btm*W_IN_MB + i] = 255;
-                        }
-                        for (i = 0; i < btm - top; ++i)
-                        {
-                            buffer[img*w*h + top*W_IN_MB + left  + i*W_IN_MB] = 255;
-                            buffer[img*w*h + top*W_IN_MB + right + i*W_IN_MB] = 255;
-                        }
-
-                    }
-                }
-
-            }
-            std::ofstream outfile("output.bin");
-            outfile.write(buffer, n*h*w);
-            outfile.close();
-
-            // break;
-        }
-    }
-
 };
 
 int main() {
@@ -468,6 +447,7 @@ int main() {
     // read whole file
     infile.read(buffer, length);
 
+    // solve
     Solution* sol = new Solution(buffer, n_images, width, height);
     ELAPSED_TIME("tada", sol->solve());
     delete sol;
