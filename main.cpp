@@ -1,8 +1,7 @@
 #include <iostream>
 #include <fstream>
-#include <bits/stdc++.h>
+#include <cstring>
 #include <chrono>
-#include <unistd.h>
 
 using namespace std;
 
@@ -122,7 +121,7 @@ public:
 
                         continue;
                     }
-                    
+
                     if (mb_map[mbid] & MB_IS_BORDER)
                     {
                         // found border of already detected object -> inbound
@@ -160,7 +159,7 @@ public:
                         {
 #ifdef ENABLE_DEBUG
                             printf("0 %s mbid#%d is %d\n", DirectionType[i], next_mbid, mb_map[next_mbid]);
-                            // buffer[offset_id + curr_mbid] = 255; // visualize boundary
+                            buffer[offset_id + curr_mbid] = 255; // visualize boundary
 #endif
                             prev_drt  = (DIRECTION)i;
                             curr_mbid = next_mbid;
@@ -192,13 +191,13 @@ public:
                             if ((mb_map[next_mbid] & MB_IS_MARKED) && (next_mbid != prev_mbid || (mb_map[next_mbid] & MB_IS_BORDER)))
                             {
 #ifdef ENABLE_DEBUG
-                                printf("1 %s %s>%s mbid#%d %d-%d is %d\n", 
+                                printf("1 %s %s>%s mbid#%d %d-%d is %d\n",
                                         DirectionType[prev_drt], DirectionType[drt],  DirectionType[drt_it],
                                         next_mbid, new_col, new_row, mb_map[next_mbid]);
-                                // buffer[offset_id + curr_mbid] = 255; // visualize boundary
+                                buffer[offset_id + curr_mbid] = 255; // visualize boundary
 #endif
                                 mb_map[curr_mbid] |= MB_IS_BORDER;
-                                
+
                                 prev_drt  = (DIRECTION)drt_it;
                                 prev_mbid = curr_mbid;
                                 curr_mbid = next_mbid;
@@ -212,7 +211,7 @@ public:
                     // process last macroblock of object's border
                     mb_map[curr_mbid] |= MB_IS_BORDER;
 #ifdef ENABLE_DEBUG
-                    // buffer[offset_id + curr_mbid] = 255; // visualize boundary
+                    buffer[offset_id + curr_mbid] = 255; // visualize boundary
 #endif
 
                     // calculate coordinate
@@ -220,6 +219,8 @@ public:
                     btm         *= MB_SIZE;
                     left        *= MB_SIZE;
                     right       *= MB_SIZE;
+                    btm         += (MB_SIZE - 1);
+                    right       += (MB_SIZE - 1);
                     auto width  = (right - left);
                     auto height = (btm - top);
 
@@ -252,7 +253,7 @@ public:
             bcnt = 0;
 #endif
         }
-        
+
 #ifdef VISUALIZE_RESULT
         // write output pictures with drawn rectangle to file
         std::ofstream outfile("output.bin");
@@ -261,7 +262,7 @@ public:
 #endif
         result_file.close();
 
-        
+
     }
 
 private:
@@ -411,8 +412,8 @@ private:
             btm += W_IN_MB;
         }
         if (!btmBounded) return false;
-        
-        auto last_col = ((id / W_IN_MB) + 1) * W_IN_MB; 
+
+        auto last_col = ((id / W_IN_MB) + 1) * W_IN_MB;
         while(rig <= last_col)
         {
 #ifdef ENABLE_DEBUG

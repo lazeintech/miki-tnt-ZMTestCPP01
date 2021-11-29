@@ -1,3 +1,5 @@
+Skip to [SOLUTION.md](./SOLUTION.md) for my solution.
+
 # Zeta Motion LTD  - Technical Challenge for Software Engineer (CPP001)
 
 In this challenge, you will be asked to write a simple application in C/C++ to find the bounding boxes of the objects in an
