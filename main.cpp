@@ -79,7 +79,9 @@ public:
         for (auto img = 0; img < n; ++img)
         {
             // process each image
+#ifdef ENABLE_DEBUG
             printf("==== processing img #%d ====\n", img);
+#endif
             offset_addr = (size_t)buffer + (img * img_bytes);
             offset_id   = img * img_bytes;
             object_cnt  = 0;
@@ -224,9 +226,10 @@ public:
                     auto width  = (right - left);
                     auto height = (btm - top);
 
+#ifdef ENABLE_DEBUG
                     printf("img#%d object#%d top left width height = %u %u %u %u\n",
                             img, ++object_cnt, top, left, width, height);
-
+#endif
                     // output result to file
                     sprintf(object_info, "(%d, %d, %d, %d) ", top, left, width, height);
                     result_file << object_info;

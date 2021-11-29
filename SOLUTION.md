@@ -24,10 +24,10 @@ CPU: Intel(R) Core(TM) i5-10400 CPU @ 2.90GHz
 Compiler: g++ (Debian 8.3.0-6) 8.3.0
 Build option: -O3
 Time consumed:
-MB1x1 -> ~ 46 ms
-MB2x2 -> ~ 13 ms
-MB4x4 -> ~  5 ms
-MB8x8 -> ~  3 ms
+MB1x1 -> ~ 39 ms
+MB2x2 -> ~ 11 ms
+MB4x4 -> ~  4 ms
+MB8x8 -> ~  2 ms
 ```
 
 2. MacOS 11.4 
@@ -36,8 +36,8 @@ CPU: Intel(R) Core(TM) i5-5257U CPU @ 2.70GHz
 Compiler: clang-1205.0.22.11
 Build option: -O3
 Time consumed:
-MB1x1 -> ~ 65 ms
-MB2x2 -> ~ 18 ms
-MB4x3 -> ~  6 ms
-MB8x8 -> ~  3 ms
+MB1x1 -> ~ 52 ms
+MB2x2 -> ~ 15 ms
+MB4x3 -> ~  5 ms
+MB8x8 -> ~  2 ms
 ```
